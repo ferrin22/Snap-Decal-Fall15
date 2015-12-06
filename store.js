@@ -331,6 +331,7 @@ SnapSerializer.prototype.loadProjectModel = function (xmlNode, ide) {
     return this.rawLoadProjectModel(xmlNode);
 };
 
+
 SnapSerializer.prototype.rawLoadProjectModel = function (xmlNode) {
     // private
     var myself = this,
@@ -1330,6 +1331,7 @@ SnapSerializer.prototype.loadValue = function (model) {
     return undefined;
 };
 
+
 SnapSerializer.prototype.loadColor = function (colorString) {
     // private
     var c = (colorString || '').split(',');
@@ -1385,6 +1387,142 @@ SnapSerializer.prototype.openProject = function (project, ide) {
     //})
 
     ide.world().keyboardReceiver = project.stage;
+};
+
+// MERGE CODE
+SnapSerializer.prototype.mergeProject = function(xmlString, ide) {
+    var model, project, myself = this;
+    xmlNode = this.parse(xmlString);
+    model = {project: xmlNode};
+    if (+xmlNode.attributes.version > this.version) {
+        throw 'Project uses newer version of Serializer';
+    }
+    /* Merge Blocks */
+    var stage = ide.stage;
+
+    project = this.project = {
+        globalVariables: ide.globalVariables,
+        stage: stage,
+        sprites: {},
+        targetStage: ide.stage// for secondary custom block def look-up
+    };
+    model.blocks = model.project.childNamed('blocks');
+    if (model.blocks) {
+        this.loadCustomBlocks(stage, model.blocks, true);
+        this.populateCustomBlocks(
+            stage,
+            model.blocks,
+            true
+        );
+        this.objects = {};
+        stage.globalBlocks.forEach(function (def) {
+            def.receiver = null;
+        });
+    }
+    model.globalVariables = model.project.childNamed('variables')
+    if (model.globalVariables) {
+        this.loadVariables(
+            project.globalVariables,
+            model.globalVariables
+        );
+    }
+    this.objects = {};
+    // this.project = {};
+    this.mediaDict = {};
+
+
+    // project = this.project = {
+    //     globalVariables: ide.globalVariables,
+    //     stage: ide.stage,
+    //     sprites: {}
+    // };
+
+    /* Merge Stage Items */
+    model.stage = model.project.require('stage');
+    // this.loadNestingInfo(project.stage, model.stage);
+    // if (model.stage.childNamed('costumes')) {
+    //     costumes = model.stage.childNamed('costumes');
+    //     project.stage.costumes = concat(project.stage.costumes, this.loadValue(costumes.require('list')));
+    // }
+    // this.loadCostumes(project.stage, model.stage);
+    // this.loadSounds(project.stage, model.stage);
+    // this.loadCustomBlocks(object, blocks);
+    // this.populateCustomBlocks(object, blocks);
+    //this.loadVariables(object.variables, model.require('variables'));
+    if (model.stage.childNamed('scripts')) {
+        this.loadScripts(project.stage.scripts, model.stage.childNamed('scripts'));
+    }
+
+    /* Merge Sprites */
+    model.sprites = model.stage.require('sprites');
+    project.sprites[project.stage.name] = project.stage;
+    secondProjName = model.project.attributes.name;
+    model.sprites.childrenNamed('sprite').forEach(function (model) {
+        var sprite  = new SpriteMorph(project.globalVariables);
+ 
+        if (model.attributes.id) {
+            myself.objects[model.attributes.id] = sprite;
+        }
+        if (model.attributes.name) {
+            sprite.name = model.attributes.name + ' (' + secondProjName + ')';
+            project.sprites[model.attributes.name] = sprite;
+        }
+        if (model.attributes.color) {
+            sprite.color = myself.loadColor(model.attributes.color);
+        }
+        if (model.attributes.pen) {
+            sprite.penPoint = model.attributes.pen;
+        }
+        project.stage.add(sprite);
+        ide.sprites.add(sprite);
+        //ide.stage.add(sprite);
+        //ide.corral.addSprite(sprite);
+        sprite.scale = parseFloat(model.attributes.scale || '1');
+        sprite.rotationStyle = parseFloat(
+            model.attributes.rotation || '1'
+        );
+        sprite.isDraggable = model.attributes.draggable !== 'false';
+        sprite.isVisible = model.attributes.hidden !== 'true';
+        sprite.heading = parseFloat(model.attributes.heading) || 0;
+        sprite.drawNew();
+        sprite.gotoXY(+model.attributes.x || 0, +model.attributes.y || 0);
+        myself.loadObject(sprite, model);
+    });
+     // restore inheritance and nesting associations
+    project.stage.children.forEach(function (sprite) {
+        var exemplar, anchor;
+        if (sprite.inheritanceInfo) { // only sprites can inherit
+            exemplar = project.sprites[
+                sprite.inheritanceInfo.exemplar
+            ];
+            if (exemplar) {
+                sprite.setExemplar(exemplar);
+            }
+        }
+        if (sprite.nestingInfo) { // only sprites may have nesting info
+            anchor = project.sprites[sprite.nestingInfo.anchor];
+            if (anchor) {
+                anchor.attachPart(sprite);
+            }
+            sprite.rotatesWithAnchor = (sprite.nestingInfo.synch === 'true');
+        }
+    });
+    project.stage.children.forEach(function (sprite) {
+        delete sprite.inheritanceInfo;
+        if (sprite.nestingInfo) { // only sprites may have nesting info
+            sprite.nestingScale = +(sprite.nestingInfo.scale || sprite.scale);
+            delete sprite.nestingInfo;
+        }
+    });
+
+    this.objects = {};
+    this.project = {};
+    this.mediaDict = {};
+
+//    ide.stage.drawNew();
+    ide.createCorral();
+    ide.fixLayout();
+
 };
 
 // SnapSerializer XML-representation of objects:
