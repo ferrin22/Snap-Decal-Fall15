@@ -352,7 +352,26 @@ IDE_Morph.prototype.openIn = function (world) {
             } else {
                 this.droppedText(getURL(hash));
             }
-        } else if (location.hash.substr(0, 5) === '#run:') {
+        } else if (location.hash.substr(0, 7) === '#merge:')  {
+            hash = location.hash.substr(6);
+            if (hash.charAt(0) === '%'
+                    || hash.search(/\%(?:[0-9a-f]{2})/i) > -1) {
+                hash = decodeURIComponent(hash);
+            }
+            if (contains(
+                    ['project', 'blocks', 'sprites', 'snapdata'].map(
+                        function (each) {
+                            return hash.substr(0, 8).indexOf(each);
+                        }
+                    ),
+                    1
+                )) {
+                this.droppedText(hash);
+            } else {
+                this.droppedText(getURL(hash));
+            }
+        }
+         else if (location.hash.substr(0, 5) === '#run:') {
             hash = location.hash.substr(5);
             if (hash.charAt(0) === '%'
                     || hash.search(/\%(?:[0-9a-f]{2})/i) > -1) {
@@ -542,7 +561,6 @@ IDE_Morph.prototype.createControlBar = function () {
         button,
         stopButton,
         pauseButton,
-        stepButton,
         startButton,
         projectButton,
         settingsButton,
@@ -687,37 +705,6 @@ IDE_Morph.prototype.createControlBar = function () {
     this.controlBar.add(pauseButton);
     this.controlBar.pauseButton = pauseButton; // for refreshing
 
-    //stepButton
-    button = new ToggleButtonMorph(
-        null,
-        myself,
-        'togglePauseResume',
-        [
-            new SymbolMorph('step', 12),
-            new SymbolMorph('step', 12)
-        ],
-        function () {
-            return myself.isPaused();
-        }
-    );
-
-    button.corner = 12;
-    button.color = colors[0];
-    button.highlightColor = colors[1];
-    button.pressColor = colors[2];
-    button.labelMinExtent = new Point(36, 18);
-    button.padding = 0;
-    button.labelShadowOffset = new Point(-1, -1);
-    button.labelShadowColor = colors[1];
-    button.labelColor = new Color(255, 220, 0);
-    button.contrast = this.buttonContrast;
-    button.drawNew();
-    button.fixLayout();
-    button.refresh();
-    stepButton = button;
-    this.controlBar.add(stepButton);
-    this.controlBar.stepButton = stepButton;
-
     // startButton
     button = new PushButtonMorph(
         this,
@@ -814,7 +801,7 @@ IDE_Morph.prototype.createControlBar = function () {
 
     this.controlBar.fixLayout = function () {
         x = this.right() - padding;
-        [stepButton, stopButton, pauseButton, startButton].forEach(
+        [stopButton, pauseButton, startButton].forEach(
             function (button) {
                 button.setCenter(myself.controlBar.center());
                 button.setRight(x);
@@ -2514,6 +2501,10 @@ IDE_Morph.prototype.projectMenu = function () {
         );
     }
     menu.addItem('Save As...', 'saveProjectsBrowser');
+    menu.addItem(
+        'Merge', 'mergeProjectsBrowser',
+        'Merge costumes, sprites, blocks and sounds from another project\'s  stage into current project\'s stage' // looks up the actual text in the translator
+    );
     menu.addLine();
     menu.addItem(
         'Import...',
@@ -2548,7 +2539,6 @@ IDE_Morph.prototype.projectMenu = function () {
         },
         'file menu import hint' // looks up the actual text in the translator
     );
-
     menu.addItem(
         shiftClicked ?
                 'Export project as plain text...' : 'Export project...',
@@ -3148,6 +3138,54 @@ IDE_Morph.prototype.openProjectString = function (str) {
     ]);
 };
 
+IDE_Morph.prototype.mergeProjectString = function (str) {
+    var msg,
+        myself = this;
+    this.nextSteps([
+        function () {
+            msg = myself.showMessage('Merging project...');
+        },
+        function () {nop(); }, // yield (bug in Chrome)
+        function () {
+            myself.rawMergeProjectString(str);
+        },
+        function () {
+            msg.destroy();
+        }
+    ]);
+};
+
+
+
+IDE_Morph.prototype.rawMergeProjectString = function (str) {
+    this.toggleAppMode(false);
+    this.spriteBar.tabBar.tabTo('scripts');
+    StageMorph.prototype.hiddenPrimitives = {};
+    StageMorph.prototype.codeMappings = {};
+    StageMorph.prototype.codeHeaders = {};
+    StageMorph.prototype.enableCodeMapping = false;
+    StageMorph.prototype.enableInheritance = false;
+    if (Process.prototype.isCatchingErrors) {
+        try {
+            this.serializer.mergeProject(
+                str,
+                this
+            );
+        } catch (err) {
+            this.showMessage('Load failed: ' + err);
+        }
+    } else {
+        this.serializer.mergeProject(
+            this.serializer.load(str, this),
+            this
+        );
+    }
+    this.stopFastTracking();
+};
+
+
+
+
 IDE_Morph.prototype.rawOpenProjectString = function (str) {
     this.toggleAppMode(false);
     this.spriteBar.tabBar.tabTo('scripts');
@@ -3323,6 +3361,17 @@ IDE_Morph.prototype.openProject = function (name) {
         str = localStorage['-snap-project-' + name];
         this.openProjectString(str);
         this.setURL('#open:' + str);
+    }
+};
+
+IDE_Morph.prototype.mergeProject = function (name) {
+    var str;
+    if (name) {
+        this.showMessage('merging project\n' + name);
+        //this.setProjectName(name);
+        str = localStorage['-snap-project-' + name];
+        this.mergeProjectString(str);
+        this.setURL('#merge:' + str);
     }
 };
 
@@ -3659,6 +3708,15 @@ IDE_Morph.prototype.saveProjectsBrowser = function () {
     }
     new ProjectDialogMorph(this, 'save').popUp();
 };
+
+//MERGE CODE
+IDE_Morph.prototype.mergeProjectsBrowser = function () {
+    new ProjectDialogMorph(this, 'merge').popUp();
+};
+
+
+
+
 
 // IDE_Morph localization
 
@@ -4425,7 +4483,16 @@ ProjectDialogMorph.prototype.init = function (ide, task) {
     );
 
     // override inherited properites:
-    this.labelString = this.task === 'save' ? 'Save Project' : 'Open Project';
+    //MERGE CODE 
+    if (this.task === 'save')
+        this.labelString = 'Save Project';
+    else if (this.task == 'open') 
+        this.labelString ='Open Project';
+    else
+        this.labelString = 'Merge Project';
+    
+
+
     this.createLabel();
     this.key = 'project' + task;
 
@@ -4463,7 +4530,7 @@ ProjectDialogMorph.prototype.buildContents = function () {
 
     this.addSourceButton('cloud', localize('Cloud'), 'cloud');
     this.addSourceButton('local', localize('Browser'), 'storage');
-    if (this.task === 'open') {
+    if (this.task === 'open' || this.task === 'merge') {
         this.addSourceButton('examples', localize('Examples'), 'poster');
     }
     this.srcBar.fixLayout();
@@ -4473,6 +4540,10 @@ ProjectDialogMorph.prototype.buildContents = function () {
         this.nameField = new InputFieldMorph(this.ide.projectName);
         this.body.add(this.nameField);
     }
+
+    // if (this.task === 'merge') {
+    //     this.addSourceButton('examples', localize('Examples'), 'poster');
+    // }
 
     this.listField = new ListMorph([]);
     this.fixListFieldItemColors();
@@ -4532,13 +4603,15 @@ ProjectDialogMorph.prototype.buildContents = function () {
     this.notesField.acceptsDrops = false;
     this.notesField.contents.acceptsDrops = false;
 
-    if (this.task === 'open') {
+    if (this.task === 'open' || this.task === 'merge') {
         this.notesText = new TextMorph('');
     } else { // 'save'
         this.notesText = new TextMorph(this.ide.projectNotes);
         this.notesText.isEditable = true;
         this.notesText.enableSelecting();
     }
+
+
 
     this.notesField.isTextLineWrapping = true;
     this.notesField.padding = 3;
@@ -4550,6 +4623,9 @@ ProjectDialogMorph.prototype.buildContents = function () {
     if (this.task === 'open') {
         this.addButton('openProject', 'Open');
         this.action = 'openProject';
+    } else if (this.task === 'merge') {
+        this.addButton('mergeProject', 'Merge');
+        this.action = 'mergeProject';
     } else { // 'save'
         this.addButton('saveProject', 'Save');
         this.action = 'saveProject';
@@ -4746,7 +4822,7 @@ ProjectDialogMorph.prototype.setSource = function (source) {
             if (myself.nameField) {
                 myself.nameField.setContents(item.name || '');
             }
-            if (myself.task === 'open') {
+            if (myself.task === 'open' || myself.task === 'merge') {
 
                 src = localStorage['-snap-project-' + item.name];
                 xml = myself.ide.serializer.parse(src);
@@ -4795,7 +4871,7 @@ ProjectDialogMorph.prototype.setSource = function (source) {
     }
     this.buttons.fixLayout();
     this.fixLayout();
-    if (this.task === 'open') {
+    if (this.task === 'open' || this.task === 'merge') {
         this.clearDetails();
     }
 };
@@ -4887,7 +4963,7 @@ ProjectDialogMorph.prototype.installCloudProjectList = function (pl) {
         if (myself.nameField) {
             myself.nameField.setContents(item.ProjectName || '');
         }
-        if (myself.task === 'open') {
+        if (myself.task === 'open' || myself.task === 'merge') {
             myself.notesText.text = item.Notes || '';
             myself.notesText.drawNew();
             myself.notesField.contents.adjustBounds();
@@ -4923,7 +4999,7 @@ ProjectDialogMorph.prototype.installCloudProjectList = function (pl) {
     this.deleteButton.show();
     this.buttons.fixLayout();
     this.fixLayout();
-    if (this.task === 'open') {
+    if (this.task === 'open' || this.task === 'merge') {
         this.clearDetails();
     }
 };
@@ -4953,6 +5029,25 @@ ProjectDialogMorph.prototype.openProject = function () {
         this.destroy();
     }
 };
+
+
+
+ProjectDialogMorph.prototype.mergeProject = function () {
+    var proj = this.listField.selected,
+        src;
+    if (!proj) {return; }
+    this.ide.source = this.source;
+    if (this.source === 'examples') {
+        src = this.ide.getURL(baseURL + 'Examples/' + proj.name + '.xml');
+        this.ide.mergeProjectString(src);
+        this.destroy();
+    } else { // 'local'
+        this.ide.mergeProject(proj.name);
+        this.destroy();
+    }
+};
+
+
 
 ProjectDialogMorph.prototype.openCloudProject = function (project) {
     var myself = this;
