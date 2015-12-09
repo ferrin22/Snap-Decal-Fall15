@@ -83,6 +83,14 @@ ArgLabelMorph, localize, XML_Element, hex_sha512*/
 
 // Global stuff ////////////////////////////////////////////////////////
 
+
+var myVar = setInterval(saveTimer, 300000); //5 minutes
+function saveTimer() {
+    var ide = this.parentThatIsA(IDE_Morph) //save function 
+    ide.save(true)
+}
+
+
 modules.threads = '2015-July-27';
 
 var ThreadManager;
@@ -209,6 +217,7 @@ ThreadManager.prototype.stopProcess = function (block) {
 };
 
 ThreadManager.prototype.pauseAll = function (stage) {
+    debugging = false
     this.processes.forEach(function (proc) {
         proc.pause();
     });
@@ -468,7 +477,7 @@ Process.prototype.pauseStep = function () {
 };
 
 // Process evaluation
-
+var debugging = false
 Process.prototype.evaluateContext = function () {
     var exp = this.context.expression;
     this.frameCount += 1;
@@ -488,7 +497,7 @@ Process.prototype.evaluateContext = function () {
         return this.evaluateInput(exp);
     }
     if (exp instanceof BlockMorph) {
-        return this.evaluateBlock(exp, exp.inputs().length);
+        return this.evaluateBlock(exp, exp.inputs().length, debugging);
     }
     if (isString(exp)) {
         return this[exp]();
@@ -496,7 +505,7 @@ Process.prototype.evaluateContext = function () {
     this.popContext(); // default: just ignore it
 };
 
-Process.prototype.evaluateBlock = function (block, argCount) {
+Process.prototype.evaluateBlock = function (block, argCount, debugging) {
     // check for special forms
     var clr = SpriteMorph.prototype.blockColor[block.category];
     var bc = block.color
@@ -504,7 +513,6 @@ Process.prototype.evaluateBlock = function (block, argCount) {
     if (contains(['reportOr', 'reportAnd', 'doReport'], block.selector)) {
         return this[block.selector](block);
     }
-
     // first evaluate all inputs, then apply the primitive
     var rcvr = this.context.receiver || this.topBlock.receiver(),
         inputs = this.context.inputs;
@@ -516,10 +524,23 @@ Process.prototype.evaluateBlock = function (block, argCount) {
             rcvr = this;
         }
         if (this.isCatchingErrors) {
+            //debug
+            if (debugging) {
+                console.log("Applying " + block.selector + " to the input: " + inputs);
+            }
+            //----------
             try {
+                result = rcvr[block.selector].apply(rcvr, inputs)
                 this.returnValueToParentContext(
-                    rcvr[block.selector].apply(rcvr, inputs)
+                    result
                 );
+                //debug
+                if (debugging) {
+                    console.log("Result: " + result);
+                    console.log("__step");
+                    this.pause();
+                }
+                //----------
                 this.popContext();
             } catch (error) {
                 this.handleError(error, block);
@@ -799,7 +820,6 @@ Process.prototype.reify = function (topBlock, parameterNames, isCustomBlock) {
     context.inputs = parameterNames.asArray();
     context.receiver
         = this.context ? this.context.receiver : topBlock.receiver();
-
     return context;
 };
 
@@ -1438,6 +1458,15 @@ Process.prototype.doIf = function () {
     this.pushContext();
 };
 
+Process.prototype.debugBlock = function (body) {
+    debugging = true
+    this.popContext();
+    if (body) {
+        this.pushContext(body.blockSequence());
+    }
+    this.pushContext();
+};
+
 Process.prototype.doIfElse = function () {
     var args = this.context.inputs,
         outer = this.context.outerContext, // for tail call elimination
@@ -2028,6 +2057,10 @@ Process.prototype.reportDifference = function (a, b) {
 
 Process.prototype.reportProduct = function (a, b) {
     return +a * +b;
+};
+
+Process.prototype.reportSquare = function (a) {
+    return +a * +a;
 };
 
 Process.prototype.reportQuotient = function (a, b) {
@@ -2632,6 +2665,9 @@ Process.prototype.reportMouseY = function () {
 };
 
 Process.prototype.reportMouseDown = function () {
+    ide = this.parentThatIsA(IDE_Morph) //my addition
+    ide.save(true)
+
     var world;
     if (this.homeContext.receiver) {
         world = this.homeContext.receiver.world();
@@ -2643,6 +2679,9 @@ Process.prototype.reportMouseDown = function () {
 };
 
 Process.prototype.reportKeyPressed = function (keyString) {
+    ide = this.parentThatIsA(IDE_Morph) //my addition
+    ide.save(true) //my addition
+    
     var stage;
     if (this.homeContext.receiver) {
         stage = this.homeContext.receiver.parentThatIsA(StageMorph);
@@ -2654,6 +2693,8 @@ Process.prototype.reportKeyPressed = function (keyString) {
 };
 
 Process.prototype.doResetTimer = function () {
+    ide = this.parentThatIsA(IDE_Morph) //my addition
+    ide.save(true)
     var stage;
     if (this.homeContext.receiver) {
         stage = this.homeContext.receiver.parentThatIsA(StageMorph);
@@ -2841,6 +2882,7 @@ Process.prototype.inputOption = function (dta) {
 };
 
 // Process stack
+
 
 Process.prototype.pushContext = function (expression, outerContext) {
     this.context = new Context(
